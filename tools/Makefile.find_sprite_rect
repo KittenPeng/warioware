@@ -1,0 +1,13 @@
+# One-off: build find_sprite_rect. Run from project root: make -f tools/Makefile.find_sprite_rect
+CC = gcc
+SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null) -I/opt/homebrew/include/SDL2 -I/usr/local/include/SDL2
+SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null) -L/opt/homebrew/lib -L/usr/local/lib -lSDL2_image
+CFLAGS = -Wall -Wextra -std=c11 $(SDL_CFLAGS)
+LDFLAGS = $(SDL_LIBS)
+
+find_sprite_rect: find_sprite_rect.c
+	$(CC) $(CFLAGS) -o find_sprite_rect find_sprite_rect.c $(LDFLAGS)
+
+.PHONY: clean
+clean:
+	rm -f find_sprite_rect
