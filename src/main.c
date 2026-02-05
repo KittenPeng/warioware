@@ -1,6 +1,7 @@
 #include "elevator.h"
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_mixer.h>
 #include <SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@ static SDL_Renderer *g_renderer = NULL;
 
 static int init_sdl(void)
 {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return -1;
     }
@@ -30,11 +31,28 @@ static int init_sdl(void)
         SDL_Quit();
         return -1;
     }
+    if ((Mix_Init(MIX_INIT_MP3) & MIX_INIT_MP3) != MIX_INIT_MP3) {
+        fprintf(stderr, "Mix_Init: %s\n", Mix_GetError());
+        TTF_Quit();
+        IMG_Quit();
+        SDL_Quit();
+        return -1;
+    }
+    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 1024) != 0) {
+        fprintf(stderr, "Mix_OpenAudio: %s\n", Mix_GetError());
+        Mix_Quit();
+        TTF_Quit();
+        IMG_Quit();
+        SDL_Quit();
+        return -1;
+    }
     return 0;
 }
 
 static void quit_sdl(void)
 {
+    Mix_CloseAudio();
+    Mix_Quit();
     TTF_Quit();
     IMG_Quit();
     SDL_Quit();

@@ -1,8 +1,11 @@
 #include "elevator.h"
 #include <SDL_image.h>
+#include <SDL_mixer.h>
 #include <SDL_ttf.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#define MINIGAME_MUSIC_PATH "assets/sounds/wario whirled.mp3"
 
 #define ELEVATOR_FONT_PATH "assets/warioware font.otf/warioware-inc-mega-microgame-big.otf"
 #define ELEVATOR_FONT_SIZE 14
@@ -44,6 +47,7 @@ struct ElevatorScene {
     SDL_Texture  *sprite_sheet;
     SDL_Texture  *mug_shot_sheet;
     SDL_Texture  *bomb_timer_sheet;
+    Mix_Music    *minigame_music;
     TTF_Font     *font;
     int           sheet_w;
     int           sheet_h;
@@ -54,7 +58,7 @@ struct ElevatorScene {
     ElevatorState state;
     int           anim_frame;
     float         anim_timer;
-    float         minigame_timer;  /* countdown 4→0, then return to elevator */
+    float         minigame_timer;  /* countdown 3→0, then return to elevator */
 };
 
 /* Green background in the elevator sheet (chroma key). */
@@ -73,8 +77,8 @@ struct ElevatorScene {
 #define MUG_SHOT_SRC_W  240
 #define MUG_SHOT_SRC_H  160
 
-/* Bomb timer: 4 seconds, 4 frames (rope long → short → explosion). Sheet 240×129, 4 frames in a row. */
-#define BOMB_TIMER_DURATION    4.0f
+/* Bomb timer: 3 seconds, 4 frames (rope long → short → explosion). Sheet 240×129, 4 frames in a row. */
+#define BOMB_TIMER_DURATION    3.0f
 #define BOMB_TIMER_FRAMES      4
 #define BOMB_TIMER_FRAME_W     60
 #define BOMB_TIMER_FRAME_H     129
@@ -173,6 +177,10 @@ ElevatorScene *elevator_scene_create(SDL_Renderer *renderer)
     if (!scene->bomb_timer_sheet)
         fprintf(stderr, "Failed to load bomb timer sheet\n");
 
+    scene->minigame_music = Mix_LoadMUS(MINIGAME_MUSIC_PATH);
+    if (!scene->minigame_music)
+        fprintf(stderr, "Mix_LoadMUS '%s': %s\n", MINIGAME_MUSIC_PATH, Mix_GetError());
+
     scene->font = TTF_OpenFont(ELEVATOR_FONT_PATH, ELEVATOR_FONT_SIZE);
     if (!scene->font)
         fprintf(stderr, "TTF_OpenFont '%s': %s\n", ELEVATOR_FONT_PATH, TTF_GetError());
@@ -196,6 +204,8 @@ void elevator_scene_destroy(ElevatorScene *scene)
         SDL_DestroyTexture(scene->mug_shot_sheet);
     if (scene->bomb_timer_sheet)
         SDL_DestroyTexture(scene->bomb_timer_sheet);
+    if (scene->minigame_music)
+        Mix_FreeMusic(scene->minigame_music);
     if (scene->sprite_sheet)
         SDL_DestroyTexture(scene->sprite_sheet);
     free(scene);
@@ -250,6 +260,8 @@ void elevator_scene_update(ElevatorScene *scene, float delta_s)
             scene->anim_frame = ELEVATOR_OPEN_FRAMES - 1;
             scene->state = ELEVATOR_STATE_MINIGAME;
             scene->minigame_timer = BOMB_TIMER_DURATION;
+            if (scene->minigame_music)
+                Mix_PlayMusic(scene->minigame_music, 0);
             break;
         }
     }
@@ -284,7 +296,7 @@ void elevator_scene_draw(ElevatorScene *scene)
             SDL_Rect src = ELEVATOR_OPEN_RECTS[frame];
             SDL_RenderCopy(r, scene->sprite_sheet, &src, &dst);
         }
-        /* During minigame: draw bomb timer (rope shortens over 4s, then explosion). */
+        /* During minigame: draw bomb timer (rope shortens over 3s, then explosion). */
         if (scene->state == ELEVATOR_STATE_MINIGAME && scene->bomb_timer_sheet && scene->minigame_timer > 0.0f) {
             float t = BOMB_TIMER_DURATION - scene->minigame_timer;
             int frame = (int)(t / BOMB_TIMER_DURATION * (float)BOMB_TIMER_FRAMES);
