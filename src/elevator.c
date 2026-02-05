@@ -7,48 +7,104 @@
 #define ELEVATOR_FONT_PATH "assets/warioware font.otf/warioware-inc-mega-microgame-big.otf"
 #define ELEVATOR_FONT_SIZE 14
 
-/* First elevator sprite rect (from tools/find_sprite_rect on elevator.png). */
-#define ELEVATOR_SRC_X  0
-#define ELEVATOR_SRC_Y  80
-#define ELEVATOR_SRC_W  240
-#define ELEVATOR_SRC_H  160
-
-/* Inset to crop green; right and bottom same for all frames. */
-#define ELEVATOR_INSET_RIGHT   2
-#define ELEVATOR_INSET_BOTTOM  10
-/* Margin so drawing stays inside viewport (avoids top/right cut-off). */
-#define ELEVATOR_DRAW_MARGIN   4
-/* Per-frame left inset: frame 1 has green on left, frame 2 bleeds from sprite 2. */
-#define ELEVATOR_INSET_LEFT_F0  6
-#define ELEVATOR_INSET_LEFT_F1 14
-#define ELEVATOR_INSET_LEFT_F2 28   /* sprite 3: further right to avoid sprite 2 */
+/* Exact sprite rects in elevator.png (inclusive coords: top-left to bottom-right).
+ * Sprite 1: 4,66 to 243,225   Sprite 2: 254,66 to 493,225   Sprite 3: 504,66 to 743,225 */
+#define ELEVATOR_SPRITE_W  240
+#define ELEVATOR_SPRITE_H  160
+static const SDL_Rect ELEVATOR_SRC_RECTS[3] = {
+    {  4, 66, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },
+    { 254, 66, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },
+    { 504, 66, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },
+};
 
 /* "Next" row has 3 frames; cycle through them. */
-#define ELEVATOR_NEXT_FRAMES    3
-#define ELEVATOR_FRAME_DURATION 0.07f
+#define ELEVATOR_NEXT_FRAMES      3
+#define ELEVATOR_FRAME_DURATION   0.07f
+#define ELEVATOR_OPEN_FRAMES      10
+#define ELEVATOR_OPEN_FRAME_TIME  0.08f
+
+/* "Open" animation: 2 rows of 5 sprites. Exact coords (top-left to bottom-right inclusive). */
+static const SDL_Rect ELEVATOR_OPEN_RECTS[10] = {
+    {   1, 310, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  1: 1,310 to 240,469 */
+    { 251, 311, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  2: 251,311 to 490,470 */
+    { 501, 311, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  3: 501,311 to 740,470 */
+    { 751, 311, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  4: 751,311 to 990,470 */
+    {1001, 311, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  5: 1001,311 to 1240,470 */
+    {   1, 476, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  6: 1,476 to 240,635 */
+    { 251, 476, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  7: 251,476 to 490,635 */
+    { 501, 476, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  8: 501,476 to 740,635 */
+    { 751, 476, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /*  9: 751,476 to 990,635 */
+    {1001, 476, ELEVATOR_SPRITE_W, ELEVATOR_SPRITE_H },  /* 10: 1001,476 to 1240,635 */
+};
+
+typedef enum { ELEVATOR_STATE_IDLE, ELEVATOR_STATE_DOORS_OPENING, ELEVATOR_STATE_MINIGAME, ELEVATOR_STATE_DOORS_CLOSING } ElevatorState;
 
 struct ElevatorScene {
     SDL_Renderer *renderer;
     SDL_Texture  *sprite_sheet;
+    SDL_Texture  *mug_shot_sheet;
+    SDL_Texture  *bomb_timer_sheet;
     TTF_Font     *font;
     int           sheet_w;
     int           sheet_h;
     int           window_w;
     int           window_h;
-    /* Game state (for later: minigames, floors) */
     int           current_floor;
     int           lives;
-    /* Idle animation: 0, 1, 2 then loop. */
+    ElevatorState state;
     int           anim_frame;
     float         anim_timer;
+    float         minigame_timer;  /* countdown 4→0, then return to elevator */
 };
+
+/* Green background in the elevator sheet (chroma key). */
+#define ELEVATOR_CHROMA_R  25
+#define ELEVATOR_CHROMA_G  128
+#define ELEVATOR_CHROMA_B  93
+
+/* Green background in mug shot sheet (chroma key). */
+#define MUG_SHOT_CHROMA_R  24
+#define MUG_SHOT_CHROMA_G  126
+#define MUG_SHOT_CHROMA_B  55
+
+/* Mug shot overlay sprite: 2,2 to 241,161 (240×160) */
+#define MUG_SHOT_SRC_X  2
+#define MUG_SHOT_SRC_Y  2
+#define MUG_SHOT_SRC_W  240
+#define MUG_SHOT_SRC_H  160
+
+/* Bomb timer: 4 seconds, 4 frames (rope long → short → explosion). Sheet 240×129, 4 frames in a row. */
+#define BOMB_TIMER_DURATION    4.0f
+#define BOMB_TIMER_FRAMES      4
+#define BOMB_TIMER_FRAME_W     60
+#define BOMB_TIMER_FRAME_H     129
+#define BOMB_TIMER_CHROMA_R    0x88
+#define BOMB_TIMER_CHROMA_G    0x88
+#define BOMB_TIMER_CHROMA_B    0x88
+
+static SDL_Texture *load_texture_with_chroma(SDL_Renderer *renderer, const char *path, Uint8 r, Uint8 g, Uint8 b)
+{
+    SDL_Surface *surf = IMG_Load(path);
+    if (!surf) {
+        fprintf(stderr, "Failed to load '%s': %s\n", path, IMG_GetError());
+        return NULL;
+    }
+    Uint32 key = SDL_MapRGB(surf->format, r, g, b);
+    if (SDL_SetColorKey(surf, SDL_TRUE, key) != 0) {
+        fprintf(stderr, "SDL_SetColorKey: %s\n", SDL_GetError());
+        SDL_FreeSurface(surf);
+        return NULL;
+    }
+    SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+    SDL_FreeSurface(surf);
+    if (!tex)
+        fprintf(stderr, "SDL_CreateTextureFromSurface: %s\n", SDL_GetError());
+    return tex;
+}
 
 static SDL_Texture *load_elevator_texture(SDL_Renderer *renderer, const char *path)
 {
-    SDL_Texture *tex = IMG_LoadTexture(renderer, path);
-    if (!tex)
-        fprintf(stderr, "Failed to load '%s': %s\n", path, IMG_GetError());
-    return tex;
+    return load_texture_with_chroma(renderer, path, ELEVATOR_CHROMA_R, ELEVATOR_CHROMA_G, ELEVATOR_CHROMA_B);
 }
 
 /* Render text at (x, y); caller does not own the returned texture (short-lived). */
@@ -107,6 +163,16 @@ ElevatorScene *elevator_scene_create(SDL_Renderer *renderer)
         return NULL;
     }
 
+    scene->mug_shot_sheet = load_texture_with_chroma(renderer, "assets/graphics/mug shot.png",
+                                                      MUG_SHOT_CHROMA_R, MUG_SHOT_CHROMA_G, MUG_SHOT_CHROMA_B);
+    if (!scene->mug_shot_sheet)
+        fprintf(stderr, "Failed to load mug shot sheet\n");
+
+    scene->bomb_timer_sheet = load_texture_with_chroma(renderer, "assets/graphics/bomb timer.png",
+                                                        BOMB_TIMER_CHROMA_R, BOMB_TIMER_CHROMA_G, BOMB_TIMER_CHROMA_B);
+    if (!scene->bomb_timer_sheet)
+        fprintf(stderr, "Failed to load bomb timer sheet\n");
+
     scene->font = TTF_OpenFont(ELEVATOR_FONT_PATH, ELEVATOR_FONT_SIZE);
     if (!scene->font)
         fprintf(stderr, "TTF_OpenFont '%s': %s\n", ELEVATOR_FONT_PATH, TTF_GetError());
@@ -126,6 +192,10 @@ void elevator_scene_destroy(ElevatorScene *scene)
         return;
     if (scene->font)
         TTF_CloseFont(scene->font);
+    if (scene->mug_shot_sheet)
+        SDL_DestroyTexture(scene->mug_shot_sheet);
+    if (scene->bomb_timer_sheet)
+        SDL_DestroyTexture(scene->bomb_timer_sheet);
     if (scene->sprite_sheet)
         SDL_DestroyTexture(scene->sprite_sheet);
     free(scene);
@@ -135,10 +205,53 @@ void elevator_scene_update(ElevatorScene *scene, float delta_s)
 {
     if (!scene)
         return;
+
+    if (scene->state == ELEVATOR_STATE_MINIGAME) {
+        scene->minigame_timer -= delta_s;
+        if (scene->minigame_timer <= 0.0f) {
+            scene->current_floor++;
+            scene->state = ELEVATOR_STATE_DOORS_CLOSING;
+            scene->anim_frame = ELEVATOR_OPEN_FRAMES - 1;
+            scene->anim_timer = 0.0f;
+        }
+        return;
+    }
+
+    /* DOORS_CLOSING: play door frames in reverse (9→0), then return to idle */
+    if (scene->state == ELEVATOR_STATE_DOORS_CLOSING) {
+        scene->anim_timer += delta_s;
+        while (scene->anim_timer >= ELEVATOR_OPEN_FRAME_TIME) {
+            scene->anim_timer -= ELEVATOR_OPEN_FRAME_TIME;
+            scene->anim_frame--;
+            if (scene->anim_frame < 0) {
+                scene->anim_frame = 0;
+                scene->state = ELEVATOR_STATE_IDLE;
+                break;
+            }
+        }
+        return;
+    }
+
+    if (scene->state == ELEVATOR_STATE_IDLE) {
+        scene->anim_timer += delta_s;
+        while (scene->anim_timer >= ELEVATOR_FRAME_DURATION) {
+            scene->anim_timer -= ELEVATOR_FRAME_DURATION;
+            scene->anim_frame = (scene->anim_frame + 1) % ELEVATOR_NEXT_FRAMES;
+        }
+        return;
+    }
+
+    /* DOORS_OPENING: advance through 10 frames, then sit on minigame (don't return to idle) */
     scene->anim_timer += delta_s;
-    while (scene->anim_timer >= ELEVATOR_FRAME_DURATION) {
-        scene->anim_timer -= ELEVATOR_FRAME_DURATION;
-        scene->anim_frame = (scene->anim_frame + 1) % ELEVATOR_NEXT_FRAMES;
+    while (scene->anim_timer >= ELEVATOR_OPEN_FRAME_TIME) {
+        scene->anim_timer -= ELEVATOR_OPEN_FRAME_TIME;
+        scene->anim_frame++;
+        if (scene->anim_frame >= ELEVATOR_OPEN_FRAMES) {
+            scene->anim_frame = ELEVATOR_OPEN_FRAMES - 1;
+            scene->state = ELEVATOR_STATE_MINIGAME;
+            scene->minigame_timer = BOMB_TIMER_DURATION;
+            break;
+        }
     }
 }
 
@@ -148,37 +261,60 @@ void elevator_scene_draw(ElevatorScene *scene)
         return;
 
     SDL_Renderer *r = scene->renderer;
-
-    /* Current animation frame (0, 1, or 2); per-frame left inset to hide green and avoid bleed. */
-    int frame = scene->anim_frame;
-    if (frame < 0) frame = 0;
-    if (frame >= ELEVATOR_NEXT_FRAMES) frame = ELEVATOR_NEXT_FRAMES - 1;
-    int inset_left = (frame == 0) ? ELEVATOR_INSET_LEFT_F0 : (frame == 1) ? ELEVATOR_INSET_LEFT_F1 : ELEVATOR_INSET_LEFT_F2;
-    SDL_Rect src = {
-        .x = ELEVATOR_SRC_X + (frame * ELEVATOR_SRC_W) + inset_left,
-        .y = ELEVATOR_SRC_Y,
-        .w = ELEVATOR_SRC_W - inset_left - ELEVATOR_INSET_RIGHT,
-        .h = ELEVATOR_SRC_H - ELEVATOR_INSET_BOTTOM
-    };
-
     int win_w = scene->window_w;
     int win_h = scene->window_h;
     if (win_w <= 0) win_w = 1;
     if (win_h <= 0) win_h = 1;
 
-    /* Draw with margin inside viewport so top/right aren't clipped. */
-    int m = ELEVATOR_DRAW_MARGIN;
-    SDL_Rect dst = {
-        .x = m,
-        .y = m,
-        .w = win_w - 2 * m,
-        .h = win_h - 2 * m
-    };
+    SDL_Rect dst = { .x = 0, .y = 0, .w = win_w, .h = win_h };
 
-    SDL_RenderCopy(r, scene->sprite_sheet, &src, &dst);
+    if (scene->state == ELEVATOR_STATE_DOORS_OPENING || scene->state == ELEVATOR_STATE_MINIGAME || scene->state == ELEVATOR_STATE_DOORS_CLOSING) {
+        /* Black background + mug shot overlay (visible during doors opening, minigame, and doors closing). */
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderFillRect(r, &dst);
+        if (scene->mug_shot_sheet) {
+            SDL_Rect mug_src = { MUG_SHOT_SRC_X, MUG_SHOT_SRC_Y, MUG_SHOT_SRC_W, MUG_SHOT_SRC_H };
+            SDL_RenderCopy(r, scene->mug_shot_sheet, &mug_src, &dst);
+        }
+        /* Doors opening or closing: draw door sprite (opening = frame 0→9, closing = frame 9→0). */
+        if (scene->state == ELEVATOR_STATE_DOORS_OPENING || scene->state == ELEVATOR_STATE_DOORS_CLOSING) {
+            int frame = scene->anim_frame;
+            if (frame < 0) frame = 0;
+            if (frame >= ELEVATOR_OPEN_FRAMES) frame = ELEVATOR_OPEN_FRAMES - 1;
+            SDL_Rect src = ELEVATOR_OPEN_RECTS[frame];
+            SDL_RenderCopy(r, scene->sprite_sheet, &src, &dst);
+        }
+        /* During minigame: draw bomb timer (rope shortens over 4s, then explosion). */
+        if (scene->state == ELEVATOR_STATE_MINIGAME && scene->bomb_timer_sheet && scene->minigame_timer > 0.0f) {
+            float t = BOMB_TIMER_DURATION - scene->minigame_timer;
+            int frame = (int)(t / BOMB_TIMER_DURATION * (float)BOMB_TIMER_FRAMES);
+            if (frame >= BOMB_TIMER_FRAMES) frame = BOMB_TIMER_FRAMES - 1;
+            SDL_Rect bomb_src = {
+                .x = frame * BOMB_TIMER_FRAME_W,
+                .y = 0,
+                .w = BOMB_TIMER_FRAME_W,
+                .h = BOMB_TIMER_FRAME_H
+            };
+            /* Draw bomb timer in top-right corner, scaled to fit. */
+            SDL_Rect bomb_dst = {
+                .x = win_w - BOMB_TIMER_FRAME_W,
+                .y = 0,
+                .w = BOMB_TIMER_FRAME_W,
+                .h = BOMB_TIMER_FRAME_H
+            };
+            SDL_RenderCopy(r, scene->bomb_timer_sheet, &bomb_src, &bomb_dst);
+        }
+    } else {
+        /* Idle: just the elevator sprite. */
+        int frame = scene->anim_frame;
+        if (frame < 0) frame = 0;
+        if (frame >= ELEVATOR_NEXT_FRAMES) frame = ELEVATOR_NEXT_FRAMES - 1;
+        SDL_Rect src = ELEVATOR_SRC_RECTS[frame];
+        SDL_RenderCopy(r, scene->sprite_sheet, &src, &dst);
+    }
 
-    /* Draw floor and lives with custom font (white). */
-    if (scene->font) {
+    /* Floor and lives only visible in elevator idle. */
+    if (scene->font && scene->state == ELEVATOR_STATE_IDLE) {
         char buf[32];
         (void)snprintf(buf, sizeof buf, "Floor %d", scene->current_floor);
         draw_text(r, scene->font, buf, 8, 8, 255, 255, 255);
@@ -197,10 +333,17 @@ void elevator_scene_set_window_size(ElevatorScene *scene, int w, int h)
 
 bool elevator_scene_process_event(ElevatorScene *scene, const SDL_Event *event)
 {
-    (void)scene;
     if (event->type == SDL_QUIT)
         return false;
-    if (event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE)
-        return false;
+    if (event->type == SDL_KEYDOWN) {
+        if (event->key.keysym.sym == SDLK_ESCAPE)
+            return false;
+        /* Spacebar: start doors-opening animation only from idle. */
+        if (event->key.keysym.sym == SDLK_SPACE && scene->state == ELEVATOR_STATE_IDLE) {
+            scene->state = ELEVATOR_STATE_DOORS_OPENING;
+            scene->anim_frame = 0;
+            scene->anim_timer = 0.0f;
+        }
+    }
     return true;
 }

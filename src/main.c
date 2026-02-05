@@ -61,7 +61,7 @@ static int create_window(void)
         g_window = NULL;
         return -1;
     }
-    /* Fixed 240×160 logical size so content is never cut off (scales to window). */
+    /* 240×160 logical size so the game view is exact; content scales to window and isn't cut off. */
     SDL_RenderSetLogicalSize(g_renderer, WINDOW_WIDTH, WINDOW_HEIGHT);
     return 0;
 }
@@ -105,7 +105,7 @@ int main(int argc, char **argv)
 
         elevator_scene_update(elevator, delta);
 
-        /* Use logical size (always 240×160) so drawing coordinates are correct. */
+        /* Logical size is always 240×160 so drawing isn't cut off at edges. */
         int w, h;
         SDL_RenderGetLogicalSize(g_renderer, &w, &h);
         if (w <= 0) w = WINDOW_WIDTH;
